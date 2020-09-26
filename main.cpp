@@ -77,6 +77,7 @@ class AffineGap {
   vector<vector<bool>> hori_left_half_; // f
   vector<vector<bool>> hori_right_half_; // g
 
+  //gap score = gap_open + gap_ext * gap_len
   const static int gap_open_ = -5;
   const static int gap_ext_ = -1;
   static int DiagScore_(const char& a, const char& b) {
