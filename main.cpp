@@ -1,3 +1,10 @@
+/*
+The 1982 Gotoh algorithm has flaws. The implementation address this flaws. 
+Inspired by paper https://www.biorxiv.org/content/10.1101/031500v1.full.pdf
+and the correct algorithm is documented at 
+https://www.researchgate.net/publication/19580571_Optimal_sequence_alignment_using_affine_gap_costs
+*/
+
 #include <iostream>
 #include <string>
 #include <vector>
