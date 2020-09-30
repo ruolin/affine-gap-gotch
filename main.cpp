@@ -1,7 +1,8 @@
 /*
-The 1982 Gotoh algorithm has flaws. The implementation address this flaws. 
-Inspired by paper https://www.biorxiv.org/content/10.1101/031500v1.full.pdf
-and the correct algorithm is documented at 
+This code snippet finds all optimal paths using affine gap penalty.
+So many public codes and textbooks implement or teach solutions leading to suboptimal solutions.
+Inspired by paper https://www.biorxiv.org/content/10.1101/031500v1.full.pdf,
+I decided to implement the correct algorithm which is documented at
 https://www.researchgate.net/publication/19580571_Optimal_sequence_alignment_using_affine_gap_costs
 */
 
@@ -11,59 +12,79 @@ https://www.researchgate.net/publication/19580571_Optimal_sequence_alignment_usi
 #include <climits>
 #include <array>
 #include <assert.h>
+#include <stack>
 
-//#include "util.h"
-
-using std::string;
-using std::vector;
-
-class AlignPath {
-  using Node = std::pair<int,int>;
-  //std::vector<Node> nodes_;
-  const std::string ref_;
-  const std::string alt_;
-  Node head_;
-  Node previous_;
-  std::array<std::string, 2> align_;
+class Alignment {
+  std::vector<std::string> display;
+  int nm = 0;
 public:
-  AlignPath(const std::string& r, const std::string& a): ref_(r), alt_(a),
-            previous_ (std::pair<int,int>(alt_.length() + 1, ref_.length() + 1)),
-            head_(std::pair<int,int>(alt_.length(), ref_.length())) {}
+  struct Node {
+    int i;
+    int j;
+    Node(int ii, int jj) : i(ii), j(jj) {}
+    Node() = default;
+  };
 
-  void GoNext(int i, int j) {
-    assert (i >=0 && j >=0);
-    //std::cerr << "i, j " << i<<", " <<j <<std::endl;
-    //std::cerr << "head " << head_.first<<", " <<head_.second <<std::endl;
-    if (i == head_.first && j + 1== head_.second ) {
-      align_[0] += ref_[j];
-      align_[1] += '-';
-
-    } else if (i + 1 == head_.first && j == head_.second) {
-      align_[0] += '-';
-      align_[1] += alt_[i];
-
-    } else if (i + 1 == head_.first && j + 1== head_.second) {
-      align_[0] += ref_[j];
-      align_[1] += alt_[i];
+  Alignment(const std::string& row, const std::string col, const std::vector<Node>& path) {
+    std::string rowgap;
+    std::string colgap;
+    std::string visual;
+    for (unsigned ii = 0; ii < path.size() - 1; ++ii) {
+      const Node & cur = path[ii];
+      const Node & next = path[ii + 1];
+      if (cur.i == next.i + 1 && cur.j == next.j + 1) {
+        rowgap += row[next.i];
+        colgap += col[next.j];
+        if (row[next.i] != col[next.j]) {
+          nm++;
+          visual += ' ';
+        } else {
+          visual += '|';
+        }
+      } else if (cur.i == next.i && cur.j == next.j + 1) {
+        nm ++;
+        visual += ' ';
+        rowgap += '-';
+        colgap += col[next.j];
+      } else if (cur.i == next.i + 1 && cur.j == next.j) {
+        nm ++;
+        visual += ' ';
+        colgap += '-';
+        rowgap += row[next.j];
+      }
     }
-    else {
-      assert (false);
-    }
-    previous_ = head_;
-    head_ = std::pair<int,int>(i,j);
+    std::reverse(colgap.begin(), colgap.end());
+    std::reverse(visual.begin(), visual.end());
+    std::reverse(rowgap.begin(), rowgap.end());
+    display.push_back(colgap);
+    display.push_back(visual);
+    display.push_back(rowgap);
   }
 
-  const std::string& Ref() const {return align_[0];}
-  const std::string& Alt() const {return align_[1];}
+  int NM() const {
+    return nm;
+  }
+  friend std::ostream& operator<<(std::ostream&, const Alignment&);
 };
 
+std::ostream& operator<<(std::ostream& os, const Alignment& align) {
+  os << align.nm << '\n';
+  for (const std::string& s : align.display) {
+    os << s << '\n';
+  }
+  return os;
+}
+
+using std::vector;
 class AffineGap {
+  using Node =  Alignment::Node;
   /*
    * matrix as Reference at row top Query at column left
    */
-  string query_;
-  string ref_;
-  AlignPath align_path_;
+  std::string rowstring_;
+  std::string colstring_;
+  vector<Node> align_path_;
+  vector<vector<Node>> paths_;
   int nrow_;
   int ncol_;
   vector<vector<int>> R_; // match matrix
@@ -78,16 +99,16 @@ class AffineGap {
   vector<vector<bool>> hori_right_half_; // g
 
   //gap score = gap_open + gap_ext * gap_len
-  const static int gap_open_ = -5;
+  const static int gap_open_ = -1;
   const static int gap_ext_ = -1;
   static int DiagScore_(const char& a, const char& b) {
     return a == b? 0: -1;
   }
 
-public:
-  AffineGap(const string& ref, const string& query): query_(query), ref_(ref), align_path_(ref_, query_),
-                                                     nrow_((int) query_.length() + 1),
-                                                     ncol_((int) ref_.length() + 1),
+ public:
+  AffineGap(const std::string& query, const std::string& ref): rowstring_(query), colstring_(ref), //align_path_(colstring_, rowstring_),
+                                                     nrow_((int) rowstring_.length() + 1),
+                                                     ncol_((int) colstring_.length() + 1),
                                                      R_(vector<vector<int>>(nrow_, vector<int>(ncol_))),
                                                      P_(vector<vector<int>>(nrow_, vector<int>(ncol_))),
                                                      Q_(vector<vector<int>>(nrow_, vector<int>(ncol_))),
@@ -110,7 +131,8 @@ public:
     }
     R_[0][0] = 0;
     diag_whole_[nrow_][ncol_] = 1;
-   //
+
+    //cost assignment
     for (int i = 0; i < nrow_; ++i) {
       for (int j = 0; j < ncol_; ++j) {
         if (i != 0) {
@@ -124,15 +146,17 @@ public:
           if (Q_[i][j] == gap_ext_ + gap_open_ + R_[i][j-1]) hori_right_half_[i][j-1] = 1;
         }
         if (i != 0 && j != 0 ) {
-          R_[i][j] = std::max(R_[i-1][j-1] + DiagScore_(ref_[j-1], query_[i-1]), std::max(Q_[i][j], P_[i][j]));
-          if (R_[i][j]  == R_[i-1][j-1] + DiagScore_(ref_[j-1], query_[i-1])) diag_whole_[i][j] = 1;
+          R_[i][j] = std::max(R_[i-1][j-1] + DiagScore_(colstring_[j-1], rowstring_[i-1]), std::max(Q_[i][j], P_[i][j]));
+          if (R_[i][j]  == R_[i-1][j-1] + DiagScore_(colstring_[j-1], rowstring_[i-1])) diag_whole_[i][j] = 1;
         }
         if (R_[i][j]  == P_[i][j]) vert_whole_[i][j] = 1;
         if (R_[i][j]  == Q_[i][j]) hori_whole_[i][j] = 1;
       }
     }
+//    std::cout<< "cost assignment\t";
+//    std::cout << diag_whole_[nrow_-1][ncol_-1] << "\t" << vert_whole_[nrow_-1][ncol_-1] << "\t" << hori_whole_[nrow_-1][ncol_-1] << "\n";
 
-    //after edge assignment bit array matrics
+    //edge assignment
     for (int i = nrow_ - 1; i >= 0; --i) {
       for (int j = ncol_ - 1; j >= 0; --j) {
         if ((vert_whole_[i+1][j] == 0 || vert_bottom_half_[i][j] == 0) &&
@@ -168,81 +192,68 @@ public:
       }
     }
     // backtrack by bit array matrics
-    int i = nrow_ - 1;
-    int j = ncol_ - 1;
-    bool must_go_vert = false;
-    bool must_go_hori = false;
-    while ( i != 0 || j != 0) {
-      if (must_go_vert) {
-        assert(vert_whole_[i][j] == 1);
-        align_path_.GoNext(i-1, j);
-        must_go_vert = vert_top_half_[i][j] == 1 ? 1 : 0;
-        --i;
-        continue;
-      }
-      if (must_go_hori) {
-        assert(hori_whole_[i][j] == 1);
-        align_path_.GoNext(i, j - 1);
-        must_go_hori = hori_left_half_[i][j] == 1 ? 1 : 0;
-        --j;
-        continue;
-      }
-
-      if (diag_whole_[i][j] == 1) {
-        align_path_.GoNext(i - 1 ,j - 1);
-        --i;
-        --j;
-        //std::cerr << "diag i,j " << i <<", " << j <<std::endl;
-      }
-      else if (vert_whole_[i][j] == 1) {
-        align_path_.GoNext(i-1, j);
-        if (vert_top_half_[i][j] == 1) must_go_vert = true;
-        --i;
-        //std::cerr << "vert i,j " << i <<", " << j <<std::endl;
-      } else if (hori_whole_[i][j] == 1) {
-        align_path_.GoNext(i, j -1);
-        if (hori_left_half_[i][j] == 1) must_go_hori = true;
-        --j;
-        //std::cerr << "hori i,j " << i <<", " << j <<std::endl;
-      } else {
-        assert (false);
-      }
-    }
+    DFS(Node(nrow_ -1, ncol_ -1), 0);
   }
 
-  void Print() const {
-//    std::cerr << "R\n";
-//    std::cerr << R_;
-//    std::cerr << "P\n";
-//    std::cerr << P_;
-//    std::cerr << "Q\n";
-//    std::cerr << Q_;
-//    std::cerr << "a\n";
-//    std::cerr << vert_whole_; // a
-//    std::cerr << "b\n";
-//    std::cerr << hori_whole_; // b
-//    std::cerr << "c\n";
-//    std::cerr << diag_whole_; // c
-//    std::cerr << "d\n";
-//    std::cerr << vert_top_half_; // d
-//    std::cerr << "e\n";
-//    std::cerr << vert_bottom_half_; // e
-//    std::cerr << "f\n";
-//    std::cerr << hori_left_half_; // f
-//    std::cerr << "g\n";
-//    std::cerr << hori_right_half_; // g
-    std::string ref;
-    std::string query;
-    for(int i = align_path_.Ref().length() - 1; i >= 0; --i) {
-      ref += align_path_.Ref()[i];
-      query += align_path_.Alt()[i];
+  void DFS(const Node& cn, const int must_go_dir) {
+    // must_go_dir, 0: not required, 1: must go left, 2: must go above
+    auto prev = align_path_.empty() ? Node(0,0) : align_path_.back();
+    align_path_.push_back(cn);
+    if (cn.i == 0 && cn.j == 0) {
+      paths_.push_back(align_path_);
     }
-    std::cout << ref << std::endl;
-    std::cout << query << std::endl;
+    else {
+      if (must_go_dir == 1) {
+        int next_must_go = hori_whole_[cn.i][cn.j] && hori_left_half_[cn.i][cn.j] ? 1 : 0;
+        DFS(Node(cn.i, cn.j-1), next_must_go);
+      }
+      else if (must_go_dir == 2){
+        int next_must_go = vert_whole_[cn.i][cn.j] && vert_top_half_[cn.i][cn.j] ? 2 : 0;
+        DFS(Node(cn.i-1, cn.j), next_must_go);
+      }
+      else {
+        if (diag_whole_[cn.i][cn.j]) {
+          DFS(Node(cn.i - 1, cn.j - 1), 0);
+        }
+        if (vert_whole_[cn.i][cn.j]) {
+          if (vert_bottom_half_[cn.i][cn.j]) {
+            if (cn.i + 1 != prev.i || cn.j != prev.j) return;
+          }
+          int next_must_go = vert_top_half_[cn.i][cn.j] ? 2 : 0;
+          DFS(Node(cn.i - 1, cn.j), next_must_go);
+        }
+        if (hori_whole_[cn.i][cn.j]) {
+          if (hori_right_half_[cn.i][cn.j]) {
+            if (cn.i != prev.i || cn.j + 1 != prev.j) return;
+          }
+          int next_must_go = hori_left_half_[cn.i][cn.j] ? 1 : 0;
+          DFS(Node(cn.i, cn.j - 1), next_must_go);
+        }
+      }
+    }
+    align_path_.pop_back();
   }
+
+  decltype(auto) Paths() const {
+    return (paths_);
+  }
+
+  decltype(auto) Path() const {
+    return paths_.front();
+  }
+
+  void PrintAllPaths() const {
+    for (auto& p : paths_) {
+      Alignment a(rowstring_, colstring_, p);
+      std::cerr << a;
+      std::cerr << '\n';
+    }
+  };
+
 };
-int main() {
-  AffineGap ag("AAAGGG", "TTAAAAGGGGTT");
-  ag.Print();
-  return 0;
+
+int main() {	
+  AffineGap ag("AAAGGG", "TTAAAAGGGGTT");	
+  ag.Print();	
+  return 0;	
 }
